@@ -1,0 +1,16 @@
+-d
+C:\\Users\\oliv\\eclipse-workspace-TA\\CLUSTER_HEAD\\build\\context1\\classes
+-classpath
+C:\\Users\\oliv\\eclipse-workspace-TA\\CLUSTER_HEAD\\build\\context1\\classes;C:\\Users\\oliv\\eclipse-workspace-TA\\CLUSTER_HEAD\\targets\\Preon32_1.5\\lib\\rtx.jar
+-sourcepath
+C:\\Users\\oliv\\eclipse-workspace-TA\\CLUSTER_HEAD\\src
+-target
+1.8
+-bootclasspath
+C:\\Users\\oliv\\eclipse-workspace-TA\\CLUSTER_HEAD\\targets\\Preon32_1.5\\lib\\rt.jar
+-encoding
+ISO-8859-1
+-g:lines,vars,source
+-source
+1.8
+C:\\Users\\oliv\\eclipse-workspace-TA\\CLUSTER_HEAD\\src\\ClusterHead.java
