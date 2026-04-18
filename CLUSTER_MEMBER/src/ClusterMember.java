@@ -1,16 +1,16 @@
 import java.io.IOException;
-import java.util.Arrays;
+//import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
-import com.virtenio.driver.device.ADXL345;
-import com.virtenio.driver.gpio.GPIO;
-import com.virtenio.driver.gpio.GPIOException;
-import com.virtenio.driver.gpio.NativeGPIO;
-import com.virtenio.driver.spi.NativeSPI;
-import com.virtenio.driver.spi.SPIException;
+//import com.virtenio.driver.device.ADXL345;
+//import com.virtenio.driver.gpio.GPIO;
+//import com.virtenio.driver.gpio.GPIOException;
+//import com.virtenio.driver.gpio.NativeGPIO;
+//import com.virtenio.driver.spi.NativeSPI;
+//import com.virtenio.driver.spi.SPIException;
 import com.virtenio.io.ChannelBusyException;
 import com.virtenio.io.NoAckException;
 import com.virtenio.misc.StringUtils;
@@ -32,7 +32,7 @@ public class ClusterMember {
 	private static final int COMMON_CHANNEL = 24;
 	private static final int COMMON_PANID = 0xCAFE;
 	
-	private static int choiceCM = 2;
+	private static int choiceCM = 1;
 	private static int[] CM_ADDRs = {0xBBB1, 0xBBB2, 0xEEE1};
 	
 	private static final int CM_ADDR = CM_ADDRs[choiceCM];
@@ -59,8 +59,10 @@ public class ClusterMember {
 	private static Shuttle shuttle;
 	private static LED red, green;
 	
-	private static ADXL345 acclSensor;
-	private static GPIO accelCs;
+//	private static ADXL345 acclSensor;
+//	private static GPIO accelCs;
+	
+	private static Sensor sensor = new Sensor();
 	
 	private static final Lock lock = new ReentrantLock();
 	
@@ -365,14 +367,14 @@ public class ClusterMember {
 		new Thread() { 
 			public void run() {
 				String valStr;
-				short[] valAccl = new short[3];
+//				short[] valAccl = new short[3];
 				long getT;
 				
-				try { 
-					initACCL();
-				} catch (Exception e) { 
-					e.printStackTrace();
-				}		
+//				try { 
+//					initACCL();
+//				} catch (Exception e) { 
+//					e.printStackTrace();
+//				}		
 				
 				while (!exit) {
 					try { 
@@ -382,9 +384,20 @@ public class ClusterMember {
 				            continue;
 				        }
 						getT = Time.currentTimeMillis(); 
-						acclSensor.getValuesRaw(valAccl, 0);
+						//acclSensor.getValuesRaw(valAccl, 0);
+						
+						String sensorData;
+						
+						try {
+						    sensorData = sensor.readAll();
+						} catch (Exception e) {
+						    e.printStackTrace();
+						    sensorData = "ERROR"; // fallback biar tetap jalan
+						}
+
+						valStr = SN + " " + CM_ADDR + " " + sensorData;
 		
-						valStr = SN + " " + CM_ADDR + " " + stringFormatTime.SFFull(getT) + " " + Arrays.toString(valAccl);
+						//valStr = SN + " " + CM_ADDR + " " + stringFormatTime.SFFull(getT) + " " + Arrays.toString(valAccl);
 						
 						lock.lock();
 						int totalBuffer;
@@ -415,12 +428,10 @@ public class ClusterMember {
 	                        Thread.sleep(100); // normal
 	                    }
 						
-					} catch (SPIException e) { 
-						e.printStackTrace();
-					} catch (GPIOException e) { 
-						e.printStackTrace();
 					} catch (InterruptedException e) {
-						
+						e.printStackTrace();
+					} catch (Exception e) {
+					    e.printStackTrace();
 					};
 				}
 				
@@ -467,18 +478,18 @@ public class ClusterMember {
 	    }.start();
 	}
 	
-	private static void initACCL() throws Exception {
-		accelCs = NativeGPIO.getInstance(20); // init GPIO
-		NativeSPI spi = NativeSPI.getInstance(0); // init SPI
-		spi.open(ADXL345.SPI_MODE, ADXL345.SPI_BIT_ORDER, ADXL345.SPI_MAX_SPEED); // open SPI
-		// Inisiasi ADXL345
-		acclSensor = new ADXL345(spi,accelCs);
-		acclSensor.open();
-		acclSensor.setPowerControl(ADXL345.POWER_MODE_NORMAL);
-		acclSensor.setDataFormat(ADXL345.DATA_FORMAT_RANGE_16G); 
-		acclSensor.setDataRate(ADXL345.DATA_RATE_100HZ);
-		acclSensor.setPowerControl(ADXL345.POWER_CONTROL_MEASURE);
-	}
+//	private static void initACCL() throws Exception {
+//		accelCs = NativeGPIO.getInstance(20); // init GPIO
+//		NativeSPI spi = NativeSPI.getInstance(0); // init SPI
+//		spi.open(ADXL345.SPI_MODE, ADXL345.SPI_BIT_ORDER, ADXL345.SPI_MAX_SPEED); // open SPI
+//		// Inisiasi ADXL345
+//		acclSensor = new ADXL345(spi,accelCs);
+//		acclSensor.open();
+//		acclSensor.setPowerControl(ADXL345.POWER_MODE_NORMAL);
+//		acclSensor.setDataFormat(ADXL345.DATA_FORMAT_RANGE_16G); 
+//		acclSensor.setDataRate(ADXL345.DATA_RATE_100HZ);
+//		acclSensor.setPowerControl(ADXL345.POWER_CONTROL_MEASURE);
+//	}
 	
 	private static void startTimer() {
 		new Thread() { //thread untuk timer seperti watch dog untuk Go Back N

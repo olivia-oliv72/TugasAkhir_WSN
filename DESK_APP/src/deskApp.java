@@ -64,14 +64,24 @@ public class deskApp {
 
 				                        int seq  = Integer.parseInt(parts[1]);
 				                        int node = Integer.parseInt(parts[2]);
-
-				                        int start = msg.indexOf("[");
-				                        int endIdx = msg.indexOf("]");
-				                        String accel = msg.substring(start, endIdx + 1);
-
-				                        String line = "Node=" + node +
-				                                      " Seq=" + seq +
-				                                      " ACCL=" + accel;
+				                        
+				                        // data sensor
+				                        String[] accel = parts[3].split(",");
+				                        String temp = parts[4];
+				                        String hum  = parts[5];
+				                        String press = parts[6];
+				                        
+				                        long now = System.currentTimeMillis();
+				                        stringFormatTime sf = new stringFormatTime();
+				                        String time = sf.SFTime(now);
+				                        
+				                        String line = "Time=" + time +
+				                                " Node=" + node +
+				                                " Seq=" + seq +
+				                                " ACCL=[" + accel[0] + "," + accel[1] + "," + accel[2] + "]" +
+				                                " TEMP=" + temp + "°C" +
+				                                " HUM=" + hum + "%" +
+				                                " PRESS=" + press + "kPa";
 
 				                        writer.write(line);
 				                        writer.newLine();
@@ -146,7 +156,7 @@ public class deskApp {
 				System.out.println(serialport.getSystemPortName());
 			}
 			
-			Preon32Helper nodeHelper = new Preon32Helper("COM3",115200); 
+			Preon32Helper nodeHelper = new Preon32Helper("COM4",115200); 
 			DataConnection conn = nodeHelper.runModule("SinkNode"); // "bStation
 
 					
@@ -155,7 +165,7 @@ public class deskApp {
 			
 			//BufferedOutputStream out = new BufferedOutputStream(conn.getOutputStream());
 			int choiceentry;
-			int[] menuChoice	= {0,0,0,0,0,0};
+//			int[] menuChoice	= {0,0,0,0,0,0};
 			byte[] buffer = new byte[1024];
 			//byte[] buffer = new byte[2048];
 			String s;

@@ -21,7 +21,7 @@ public class ClusterHead {
 	private static final int COMMON_PANID = 0xCAFE;
 	private static final int COMMON_CHANNEL = 24;
 
-	private static int choiceCH = 5;
+	private static int choiceCH = 1;
 	private static long PARENT_NODE = 0;
 	private static int CH_ADDR = 0;
 	private static long[] CM_ADDR = {};
