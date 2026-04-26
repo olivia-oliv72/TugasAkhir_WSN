@@ -1,5 +1,3 @@
-import java.util.Arrays;
-
 import com.virtenio.driver.device.ADT7410;
 import com.virtenio.driver.device.ADXL345;
 import com.virtenio.driver.device.MPL115A2;
@@ -10,7 +8,7 @@ import com.virtenio.driver.gpio.NativeGPIO;
 
 import com.virtenio.driver.spi.NativeSPI;
 import com.virtenio.driver.spi.SPIException;
-
+import com.virtenio.vm.Time;
 import com.virtenio.driver.i2c.I2C;
 import com.virtenio.driver.i2c.NativeI2C;
 
@@ -83,7 +81,6 @@ public class Sensor {
         }
 
         initialized = true;
-        System.out.println("Sensor initialized");
     }
 
     // ===== READ SEMUA SENSOR =====
@@ -114,8 +111,9 @@ public class Sensor {
 
         // ===== FORMAT OUTPUT =====
         return accel[0] + "," + accel[1] + "," + accel[2]
-        	     + " " + ((int)(temp * 100) / 100.0)
-        	     + " " + ((int)(hum * 100) / 100.0)
-        	     + " " + ((int)(press * 100) / 100.0);
+        	     + " " + ((int)(temp * 10) / 10.0)
+        	     + " " + ((int)(hum * 10) / 10.0)
+        	     + " " + ((int)(press * 10) / 10.0) 
+        	     + " " + Time.currentTimeMillis();
     }
 }

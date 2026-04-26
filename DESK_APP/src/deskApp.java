@@ -19,15 +19,20 @@ public class deskApp {
 	private Scanner choice; 
 	private volatile boolean exit = false;
 	
+	Map<String, List<String>> clusterMap =  new HashMap<>();;
+	Map<String, String> nodeInfo;
+	
+	Map<Integer, TreeMap<Integer, String>> nodeBuffer = new HashMap<>();
+	Map<Integer, Integer> expectedSeqMap = new HashMap<>();
+	
 	Preon32Helper c;
 	private ArrayList<SerialPort> listSerialPorts;
 	
 	public void writeToFile(String fName, String folName, BufferedInputStream in) throws Exception {
 		new Thread() {	
 			byte[] buffer = new byte[256];
-			String s; 
-			long count=0;
 			File newFolder = new File(folName);
+			@Override
 			public void run() {
 				// disini check apakah sdh ada direktori hari ini
 				// jika belum dibuat
@@ -57,37 +62,69 @@ public class deskApp {
 				                int end = sb.indexOf("#");
 				                String msg = sb.substring(0, end);
 				                sb.delete(0, end + 1);
+				                
+					            String[] parts = msg.trim().split(" ");
 
-				                if (msg.startsWith("SENSE")) {
+					            if (parts[0].equals("4")) {
 				                    try {
-				                        String[] parts = msg.trim().split("\\s+");
-
+				                        // safety dulu
+				                        if (parts.length < 8) {
+				                            System.out.println("Data tidak lengkap: " + msg);
+				                            continue;
+				                        }
+				                        
 				                        int seq  = Integer.parseInt(parts[1]);
 				                        int node = Integer.parseInt(parts[2]);
 				                        
 				                        // data sensor
 				                        String[] accel = parts[3].split(",");
+				                        if (accel.length < 3) {
+				                            System.out.println("ACCL error: " + msg);
+				                            continue;
+				                        }
+				                        
 				                        String temp = parts[4];
 				                        String hum  = parts[5];
 				                        String press = parts[6];
 				                        
-				                        long now = System.currentTimeMillis();
-				                        stringFormatTime sf = new stringFormatTime();
-				                        String time = sf.SFTime(now);
+				                        long time = Long.parseLong(parts[7]);
 				                        
-				                        String line = "Time=" + time +
-				                                " Node=" + node +
-				                                " Seq=" + seq +
-				                                " ACCL=[" + accel[0] + "," + accel[1] + "," + accel[2] + "]" +
-				                                " TEMP=" + temp + "°C" +
-				                                " HUM=" + hum + "%" +
-				                                " PRESS=" + press + "kPa";
+				                        String line =    
+				                        			   " Time=" + stringFormatTime.SFTime(time) +
+					                                " Node=" + node +
+					                                " Seq=" + seq +
+					                                " ACCL=[" + accel[0] + "," + accel[1] + "," + accel[2] + "]" +
+					                                " TEMP=" + temp + "°C" +
+					                                " HUM=" + hum + "%" +
+					                                " PRESS=" + press + "kPa";
+				                        
+//				                        System.out.println(line);
+				                        
+				                        nodeBuffer.putIfAbsent(node, new TreeMap<>());
+				                        expectedSeqMap.putIfAbsent(node, 0);
 
-				                        writer.write(line);
-				                        writer.newLine();
-				                        writer.flush();
+				                        nodeBuffer.get(node).put(seq, line);
 
-				                        System.out.println("SAVE: " + line);
+//				                        dataBuffer.put(seq, line);
+
+				                        TreeMap<Integer, String> buffer = nodeBuffer.get(node);
+				                        int expected = expectedSeqMap.get(node);
+
+				                        while (buffer.containsKey(expected)) {
+				                            String outLine = buffer.remove(expected);
+
+				                            outLine = "DESKAPP=" + stringFormatTime.SFTime(System.currentTimeMillis()) + outLine;
+
+				                            writer.write(outLine);
+				                            writer.newLine();
+				                            writer.flush();
+
+				                            System.out.println(outLine);
+
+				                            expected++;
+				                        }
+
+				                        expectedSeqMap.put(node, expected);
 
 				                    } catch (Exception e) {
 				                        System.out.println("Parse error: " + msg);
@@ -143,12 +180,49 @@ public class deskApp {
 			antProject.fireBuildFinished(null);
 		} catch (BuildException e) { e.printStackTrace();}
 	}
+	
+	public void showMenu(int input1, int input2, int input4) {
 
-	public void init() throws Exception 
-	{
+	    final String GRAY = "\u001B[90m";
+	    final String RESET = "\u001B[0m";
+	    System.out.println();
+	    System.out.println("==============================");
+	    System.out.println("             MENU             ");
+	    System.out.println("==============================");
+
+	    // 1. Deteksi Node
+	    if (input4 == 1) {
+	        System.out.println(GRAY + "1. Deteksi Node Aktif" + RESET);
+	    } else {
+	        System.out.println("1. Deteksi Node Aktif");
+	    }
+
+	    // 2 & 3
+	    if (input4 == 1 || input1 == 0) {
+	        System.out.println(GRAY + "2. Sinkronisasi Waktu Node" + RESET);
+	        System.out.println(GRAY + "3. Ambil Waktu Node" + RESET);
+	    } else {
+	        System.out.println("2. Sinkronisasi Waktu Node");
+	        System.out.println("3. Ambil Waktu Node");
+	    }
+
+	    // 4
+	    if (input4 == 1 || input2 == 0) {
+	        System.out.println(GRAY + "4. Mulai Proses Sensing" + RESET);
+	    } else {
+	        System.out.println("4. Mulai Proses Sensing");
+	    }
+
+	    // 5
+	    System.out.println("5. Keluar");
+
+	    System.out.println("------------------------------");
+	    System.out.print("Pilihan: ");
+	}
+
+	public void init() throws Exception {
 		stringFormatTime sfTime = new stringFormatTime();
-		try 
-		{
+		try {
 			SerialPort[] arrSerialPort = SerialPort.getCommPorts();	
 			this.listSerialPorts = this.filterPort(arrSerialPort, "Preon32");
 			
@@ -156,7 +230,7 @@ public class deskApp {
 				System.out.println(serialport.getSystemPortName());
 			}
 			
-			Preon32Helper nodeHelper = new Preon32Helper("COM4",115200); 
+			Preon32Helper nodeHelper = new Preon32Helper("COM6",115200); 
 			DataConnection conn = nodeHelper.runModule("SinkNode"); // "bStation
 
 					
@@ -165,7 +239,11 @@ public class deskApp {
 			
 			//BufferedOutputStream out = new BufferedOutputStream(conn.getOutputStream());
 			int choiceentry;
-//			int[] menuChoice	= {0,0,0,0,0,0};
+			
+			int input1 = 0;
+			int input2 = 0;
+			int input4 = 0;
+			
 			byte[] buffer = new byte[1024];
 			//byte[] buffer = new byte[2048];
 			String s;
@@ -173,54 +251,115 @@ public class deskApp {
 			/// START MENU
 			conn.flush();
 			do { 
-				System.out.println("MENU");
-				System.out.println("1. Check Online"); // utk mendapatkan rata2 delay RTT
-	    			System.out.println("2. Synchronize Time");
-		    		System.out.println("3. Get Time from Cluster Member");
-		    		System.out.println("4. Start Sensing");
-		    		//System.out.println("0. Exit --> pa eli");
-		    		System.out.println("5. Stop Sensing");
-		    		System.out.println("6. Exit Programme");
-		    		System.out.println("Choice: ");
+				showMenu(input1, input2, input4);
 	    		
 		    		choiceentry = choice.nextInt();
 		    		conn.write(choiceentry); 
 		    		Thread.sleep(1000); 
 		    		switch (choiceentry) {
-		    			case 0:
-		    				exit = true;
-		    				break;
 		    			case 1: 
+		    				input1 = input1 + 1;
 		    				buffer = new byte[1024];
 		    				while(in.available() > 0) {
 		    					in.read(buffer);
-		    					s = new String(buffer);
-		    					//System.out.println(s);
 		    					conn.flush();
-		    					String[] subStr=s.split("#");
-		    					//System.out.println(Arrays.toString(subStr));
+		    					s = new String(buffer);
+		    					String[] subStr = s.split("#");
+		    					nodeInfo = new HashMap<>();
 		    					
 		    					for (String w:subStr) {
-		    						//if (w.startsWith("HELLO"))
-		    							System.out.println(w);
-		    						//else if (w.startsWith("RSSI"))
-		    							//System.out.println(w);
+		    						w = w.trim();
+		    						if (w.isEmpty()) continue;
+		    						String[] parts = w.split(" ");
+		    						
+			    					Long addr = Long.parseLong(parts[0]);
+			    					String hex_addr = Long.toHexString(addr);
+			    					long time = Long.parseLong(parts[1]);
+			    					long rtt = Long.parseLong(parts[2].trim());
+			    					boolean isCH = parts[3].equals("CH");
+			    					if (isCH) {
+			    						clusterMap.putIfAbsent(hex_addr, new ArrayList<>());
+			    					}
+			    					else {
+			    						long chAddr = Long.parseLong(parts[3]);
+			    						String chHex_addr = Long.toHexString(chAddr);
+
+			    					    clusterMap.putIfAbsent(chHex_addr, new ArrayList<>());
+			    					    if (!clusterMap.get(chHex_addr).contains(hex_addr)) {
+			    					        clusterMap.get(chHex_addr).add(hex_addr);
+			    					    }
+			    					}
+			    					String line = hex_addr +
+					    					    " Time=" + stringFormatTime.SFFull(time) +
+					    					    " RTT=" + rtt + " ms";
+			    					
+			    					nodeInfo.put(hex_addr, line);
+		    					}
+		    					
+		    					int clusterNum = 1;
+		    					for (String ch : clusterMap.keySet()) {
+		    					    System.out.println("[Cluster " + clusterNum + "]");
+
+		    					    // print CH
+		    					    System.out.println("CH  : " + nodeInfo.get(ch));
+
+		    					    // print CM
+		    					    List<String> cmList = clusterMap.get(ch);
+		    					    for (String cm : cmList) {
+		    					        System.out.println("CM  : " + nodeInfo.get(cm));
+		    					    }
+
+		    					    System.out.println();
+		    					    clusterNum++;
 		    					}
 		    				}
 		    				break;
 					case 2: 
-						buffer = new byte[1024];
-						while ( in.available() > 0) { 
-							in.read(buffer);
-							conn.flush();
-							s = new String(buffer);	
-							String[] subStr=s.split("#");
-							for (String w:subStr) {
-		    						if (w.startsWith("SET"))
-		    							System.out.println(w);
-		    						else if (w.startsWith("RSSI"))
-		    							System.out.println(w);
-	    						}
+						if (input1 > 0) {
+							input2 = input2 + 1;
+							buffer = new byte[1024];
+							while ( in.available() > 0) { 
+								in.read(buffer);
+								conn.flush();
+								s = new String(buffer);	
+								String[] subStr=s.split("#");
+								
+								nodeInfo = new HashMap<>();
+								
+								for (String w:subStr) {
+									w = w.trim();
+									if (w.isEmpty()) continue;
+									String[] parts = w.split(" ");
+									Long addr = Long.parseLong(parts[0]);
+									String hex_addr = Long.toHexString(addr);
+									long time = Long.parseLong(parts[1]);
+									
+									String line = hex_addr +
+												" Time=" + stringFormatTime.SFFull(time);
+									
+									nodeInfo.put(hex_addr, line);
+								}
+								
+								int clusterNum = 1;
+			    					for (String ch : clusterMap.keySet()) {
+			    					    System.out.println("[Cluster " + clusterNum + "]");
+	
+			    					    // print CH
+			    					    System.out.println("CH  : " + nodeInfo.get(ch));
+	
+			    					    // print CM
+			    					    List<String> cmList = clusterMap.get(ch);
+			    					    for (String cm : cmList) {
+			    					        System.out.println("CM  : " + nodeInfo.get(cm));
+			    					    }
+	
+			    					    System.out.println();
+			    					    clusterNum++;
+			    					}
+							}
+						}
+						else {
+							System.out.println("Please check for RTT first!");
 						}
 						break;
 					case 3: 
@@ -233,45 +372,63 @@ public class deskApp {
 							conn.flush();
 							s = new String(buffer);
 							String[] subStr=s.split("#");
+							
+							nodeInfo = new HashMap<>();
+							
 							for (String w:subStr) {
-	    						if (w.startsWith("NOW"))
-	    							System.out.println(w);
-	    						else if (w.startsWith("RSSI"))
-	    							System.out.println(w);
+								w = w.trim();
+		    						if (w.isEmpty()) continue;
+		    						String[] parts = w.split(" ");
+			    					Long addr = Long.parseLong(parts[0]);
+			    					String hex_addr = Long.toHexString(addr);
+			    					long time = Long.parseLong(parts[1]);
+	
+			    					String line = hex_addr +
+			    								" Time=" + stringFormatTime.SFFull(time);
+			    					
+			    					nodeInfo.put(hex_addr, line);
 							}
+							
+							int clusterNum = 1;
+		    					for (String ch : clusterMap.keySet()) {
+		    					    System.out.println("[Cluster " + clusterNum + "]");
+	
+		    					    // print CH
+		    					    System.out.println("CH  : " + nodeInfo.get(ch));
+	
+		    					    // print CM
+		    					    List<String> cmList = clusterMap.get(ch);
+		    					    for (String cm : cmList) {
+		    					        System.out.println("CM  : " + nodeInfo.get(cm));
+		    					    }
+	
+		    					    System.out.println();
+		    					    clusterNum++;
+		    					}
 						}
 						break;
 					case 4: 
-						long msecs = cal.getTimeInMillis();
-						String fName = sfTime.SFFile(msecs);
-						String folName = sfTime.SFDate(msecs);
-						fName = "ACL_"+ fName + ".txt";
-						System.out.println("File name: " + fName);
-						System.out.println("Folder name: " + folName);
-						writeToFile(fName, folName, in); // thread of void
-						break;
-					case 5:
-						buffer = new byte[1024];
-						while (in.available() > 0) {
-							in.read(buffer);
-							conn.flush();
-							s = new String(buffer);
-							String[] subStr=s.split("#");
-							for (String w:subStr) {
-	    						if (w.startsWith("STOP SENSING"))
-	    							System.out.println(w);
-	    						else if (w.startsWith("RSSI"))
-	    							System.out.println(w);
-							}
+						if (input2 > 0) {
+							input4 = input4 + 1;
+							long msecs = cal.getTimeInMillis();
+							String fName = sfTime.SFFile(msecs);
+							String folName = sfTime.SFDate(msecs);
+							fName = "ACL_"+ fName + ".txt";
+							System.out.println("File name: " + fName);
+							System.out.println("Folder name: " + folName);
+							writeToFile(fName, folName, in); // thread of void
+						}
+						else {
+							System.out.println("Please synchronize time first!");
 						}
 						break;
-					case 6: 
+					case 5: 
 						System.out.println("EXIT PROGRAMME");
 						exit = true;
 						break;
 				}   
 	    		
-			} while (choiceentry !=0);
+			} while (choiceentry !=5);
 			
 		} catch (Exception e) { 
 			//e.printStackTrace();

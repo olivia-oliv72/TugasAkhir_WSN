@@ -36,7 +36,7 @@ public class stringFormatTime {
 
     	sBuf.append(".");
     	int msecond = cal.get(Calendar.MILLISECOND);
-    	sBuf.append(Integer.toString(msecond));
+    	sBuf.append(String.format("%03d", msecond));
     	sBuf.append(" ");
 
 		int day = cal.get(Calendar.DAY_OF_MONTH);
@@ -118,7 +118,7 @@ public class stringFormatTime {
     	return (sBuf.toString());
 	}
 
-	public String SFTime(long msecs)
+	public static String SFTime(long msecs)
 	{
 		GregorianCalendar cal = new GregorianCalendar();
     	StringBuffer sBuf = new StringBuffer(8);
@@ -149,7 +149,7 @@ public class stringFormatTime {
 
     	sBuf.append(".");
     	int msecond = cal.get(Calendar.MILLISECOND);
-    	sBuf.append(Integer.toString(msecond));
+    	sBuf.append(String.format("%03d", msecond));
     	sBuf.append(" ");
 
     	return (sBuf.toString());

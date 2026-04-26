@@ -1,16 +1,10 @@
 import java.io.IOException;
-//import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
-//import com.virtenio.driver.device.ADXL345;
-//import com.virtenio.driver.gpio.GPIO;
-//import com.virtenio.driver.gpio.GPIOException;
-//import com.virtenio.driver.gpio.NativeGPIO;
-//import com.virtenio.driver.spi.NativeSPI;
-//import com.virtenio.driver.spi.SPIException;
 import com.virtenio.io.ChannelBusyException;
 import com.virtenio.io.NoAckException;
 import com.virtenio.misc.StringUtils;
@@ -32,21 +26,17 @@ public class ClusterMember {
 	private static final int COMMON_CHANNEL = 24;
 	private static final int COMMON_PANID = 0xCAFE;
 	
-	private static int choiceCM = 1;
+	private static int choiceCM = 2;
 	private static int[] CM_ADDRs = {0xBBB1, 0xBBB2, 0xEEE1};
 	
 	private static final int CM_ADDR = CM_ADDRs[choiceCM];
 	private static long CH_ADDR = 0;
 	
-	private static final int WINDOW_SIZE = 5;
+	private static int SN = 0;
+	private static Map<Integer, String> pendingData = new LinkedHashMap<>();
+	private static Map<Integer, String> unackedData = new HashMap<>();
+	private static Map<Integer, Long> sentTime = new HashMap<>();
 	private static final long TIMEOUT = 2000; // 2 detik
-	
-	private static Integer SN = 0;
-	private static int base = 0; //SN paling kecil yang belum di ACK
-	private static long timerStart = 0;
-	
-	private static Map<Integer, String> dataQueue = new HashMap<>();
-	private static Map<Integer, String> buffer = new HashMap<>();
 		
 	private static final int MAX_BUFFER = 50;
 	
@@ -59,9 +49,6 @@ public class ClusterMember {
 	private static Shuttle shuttle;
 	private static LED red, green;
 	
-//	private static ADXL345 acclSensor;
-//	private static GPIO accelCs;
-	
 	private static Sensor sensor = new Sensor();
 	
 	private static final Lock lock = new ReentrantLock();
@@ -71,7 +58,6 @@ public class ClusterMember {
 		initRadio();
 	    initFrameIO();
 	    initLED();
-	    resetSN();
 	}
 	
 	private static void initAddr() {
@@ -110,441 +96,318 @@ public class ClusterMember {
 		red.open();
 	}
 	
-	private static void resetSN() throws Exception {
-		SN = 0;
+	private static void threadSleep(int ms) {
+	    try {
+	        Thread.sleep(ms);
+	    } catch (InterruptedException e) {
+	        Thread.currentThread().interrupt();
+	    }
 	}
 	
-	private static void startReceiver(final FrameIO fio) {
+	private static void receiveFrame(final FrameIO fio) {
 		new Thread() {
+			@Override
 			public void run() {
 				Frame frame = new Frame();
 				
 				while (!exit) {
-					System.out.println("Cluster Member Ready " + Long.toHexString(CM_ADDR));
 					try {
-						// receive a frame
 						radio.setState(AT86RF231.STATE_RX_AACK_ON); 
 						fio.receive(frame); 
-						long t2 = Time.currentTimeMillis(); 
-						processFrame (frame,t2);					
+						
+						long tReceivedFrame = Time.currentTimeMillis(); 
+						processFrame (frame,tReceivedFrame);					
 					} catch (Exception e) {
-						e.printStackTrace();
+						threadSleep(50);
 					}
 				}
 			}
 		}.start();
 	}
 	
-	// kirim frame khusus DATA SENSING
-	private static void sendSensingFrame(final FrameIO fio, String mesg, Integer sn) throws InterruptedException {
+	// Kirim frame yang bukan data sensing
+	private static void transmitFrame (final FrameIO fio, final String mesg) {
 		try {
-			String message = "SENSE " + mesg;
+			int frameControl = 	Frame.TYPE_DATA | 
+//								Frame.ACK_REQUEST | 
+								Frame.DST_ADDR_16 | 
+								Frame.INTRA_PAN | 
+								Frame.SRC_ADDR_16;
 			
-			Frame frame = new Frame(Frame.TYPE_DATA | 
-									Frame.ACK_REQUEST | 
-									Frame.DST_ADDR_16 | 
-									Frame.INTRA_PAN | 
-									Frame.SRC_ADDR_16);
-						
+			final Frame frame = new Frame(frameControl);
+			
 			frame.setSrcAddr(CM_ADDR);
 			frame.setSrcPanId(COMMON_PANID);
 			
 			frame.setDestAddr(CH_ADDR);
 			frame.setDestPanId(COMMON_PANID);
-			
-			frame.setSequenceNumber(sn);
+									
+			String message = mesg + " " + Time.currentTimeMillis(); // + t3: transmit Time;
 			frame.setPayload(message.getBytes());
 			
 			radio.setState(AT86RF231.STATE_TX_ARET_ON);
-			System.out.println(message);
-			fio.transmit(frame);
-		} catch (RadioDriverException e) { 
-			e.printStackTrace();
-		} catch (NoAckException e) { 
-			
-		} catch (ChannelBusyException e) { 
-			System.out.println("Channel busy, retry SN=" + sn);
-		} catch (IOException e) {
-			
+			fio.transmit(frame); 
+		} catch (Exception e) { 
+			threadSleep(50);
 		}
-	}
-	
-	// Kirim frame yang bukan data sensing
-	private static void startTransmitter (final FrameIO fio, final String mesg) {
-		new Thread() {
-			@Override
-			public void run() 
-			{
-				boolean isOK = false;
-				while (!isOK)
-				{
-					try {
-						int frameControl = 	Frame.TYPE_DATA | 
-											//Frame.ACK_REQUEST | 
-											Frame.DST_ADDR_16 | 
-											Frame.INTRA_PAN | 
-											Frame.SRC_ADDR_16;
-						
-						final Frame frame = new Frame(frameControl);
-						
-						frame.setSrcAddr(CM_ADDR);
-						frame.setSrcPanId(COMMON_PANID);
-						
-						frame.setDestAddr(CH_ADDR);
-						frame.setDestPanId(COMMON_PANID);
-												
-						String message = mesg + " " + Time.currentTimeMillis(); // + t3: transmit Time;
-						//System.out.println("7. " + message);
-						frame.setPayload(message.getBytes());
-						
-						radio.setState(AT86RF231.STATE_TX_ARET_ON);
-						fio.transmit(frame); 
-						System.out.println("transmitted");
-						isOK = true;
-					} catch (Exception e) { 
-						e.printStackTrace();
-					}
-				}
-				
-				
-			}
-		}.start();
 	}
 	
 	private static void processFrame (final Frame f, final long t2) throws Exception {
-		//new Thread () {
-			//final Lock lock = new ReentrantLock();
-			
-			//public void run(){
-				int code = -1;
-				if (f!=null) {
-					try {
-						byte[] dg = f.getPayload(); 
-						String mesgRecv = new String(dg, 0, dg.length);
-						String mesgSplit[] = StringUtils.split(mesgRecv, " ");
+		String code;
+		if (f!=null) {
+			try {
+				byte[] dg = f.getPayload(); 
+				String mesgRecv = new String(dg, 0, dg.length);
+				String mesgSplit[] = StringUtils.split(mesgRecv, " ");
 				
-						if 		(mesgSplit[0].equalsIgnoreCase("1")) code = 1;
-						else if (mesgSplit[0].equalsIgnoreCase("2")) code = 2;
-						else if (mesgSplit[0].equalsIgnoreCase("3")) code = 3;
-						else if (mesgSplit[0].equalsIgnoreCase("4")) code = 4;
-						else if (mesgSplit[0].equalsIgnoreCase("5")) code = 5;
-						else if (mesgSplit[0].equalsIgnoreCase("6")) code = 6;
-						else if (mesgSplit[0].equalsIgnoreCase("ACK")) code = 7;
-						switch (code) {
-//							case 0 :
-//								System.out.println("stop"); 
-//								//lock.lock(); try { exit = true; } finally { lock.unlock();}
-//								exit = true;
-//								break; 
-							case 1: 
-								//System.out.println("4. menuju processHELLO " + mesgRecv);
-								processHELLO(mesgSplit, t2); 
-								break; 
-							case 2: 
-								processSetTimeNOW(mesgSplit,t2); 
-								break;
-							case 3: 
-								processGetTimeNOW(mesgSplit, t2); 
-								break;
-							case 4:
-								//isSensing = true;
-								//resetSN();
-							    //base = 0;
-							    //buffer.clear();
-								System.out.println("goSense");
-								if (!sensingThreadStarted) {
-							        sensingThreadStarted = true;
-							        goSense();
-							    }
-								isSensing = true;
-								break; 
-							case 5:
-								isSensing = false;
-								red.off();
-								green.on();
-								break;
-							case 6:
-								exit = true;
-								green.off();
-								break;
-							case 7: 
-								try {
-							        int ackSN = Integer.parseInt(mesgSplit[2]);
+				code = mesgSplit[0];
+				switch (code) {
+					case "1": 
+						processHELLO(mesgSplit, t2); 
+						break; 
+					case "2": 
+						processSetTimeNOW(mesgSplit,t2); 
+						break;
+					case "3": 
+						processGetTimeNOW(mesgSplit); 
+						break;
+					case "4":
+						System.out.println("goSense");
+						if (!sensingThreadStarted) {
+					        sensingThreadStarted = true;
+					        startTimer();
+					        startSender();
+					        goSense();
+					    }
+						isSensing = true;
+						break;
+					case "5":
+						isSensing = false;
+						exit = true;
+						green.off();
+						red.off();
+						radio.setState(AT86RF231.STATE_TRX_OFF);
+						break;
+					case "ACK":
+					    try {
+					        int ackSN = Integer.parseInt(mesgSplit[2]);
 
-							        System.out.println("ACK diterima untuk SN=" + ackSN);
-							        
-							        lock.lock();
-							        try {
-								        if (ackSN >= base) {
-								            for (int i = base; i <= ackSN; i++) {
-								                buffer.remove(i);
-								            }
-								            System.out.println("Remove hingga SN ke = " + ackSN);
-	
-								            base = ackSN + 1;
-								            
-								            timerStart = Time.currentTimeMillis();
-								        }
-								        
-								        int totalBuffer = dataQueue.size() + buffer.size();
-	
-								        if (totalBuffer >= MAX_BUFFER) {
-								            isSensing = false;
-								        } else if (totalBuffer < MAX_BUFFER / 2) {
-								            isSensing = true;
-								        }
-								        
-							        } finally {
-							        		lock.unlock();
-								    }
-							    } catch (Exception e) {
-							        e.printStackTrace();
-							    }
-								break;
-							default:
-								break;
-						}
-					} catch (Exception e) { 
-						e.printStackTrace();
-					}
+					        //System.out.println("ACK diterima untuk SN=" + ackSN);
+
+					        lock.lock();
+					        try {
+					            if (unackedData.containsKey(ackSN)) {
+					                unackedData.remove(ackSN);
+					                sentTime.remove(ackSN);
+
+					                //System.out.println("ACK OK, remove seq=" + ackSN);
+					            }
+
+//					            int totalBuffer = pendingData.size() + unackedData.size();
+//
+//					            if (totalBuffer >= MAX_BUFFER) {
+//					                isSensing = false;
+//					            } else if (totalBuffer < MAX_BUFFER / 2) {
+//					                isSensing = true;
+//					            }
+
+					        } finally {
+					            lock.unlock();
+					        }
+
+					    } catch (Exception e) {
+					    		threadSleep(50);
+					    }
+					    break;
+					default:
+						break;
 				}
-			//}
-		//}.start();
+			} catch (Exception e) { 
+				threadSleep(50);
+			}
+		}
 	}
 
 	private static void processHELLO(final String mesgSplit[], final long t2) throws Exception {	
-		// after frame received, this node process it and transmit frame for reply
-		long t1 = Long.parseLong(mesgSplit[2]); // time from CH = transmit time from BS
+		long t1 = Long.parseLong(mesgSplit[1]); // Waktu CH kirim frame
 		String message = "1 " + CM_ADDR + " " + t1 + " " + t2; 
-		//System.out.println("5. " + message);
-		//System.out.println("6. menuju startTransmitter");
-		lock.lock();
-		try {
-		    startTransmitter(fio, message);
-		} finally {
-		    lock.unlock();
-		}
+		transmitFrame(fio, message);
 	}
 	
 	private static void processSetTimeNOW(String mesgSplit[], long t2) throws Exception { 
-		// format pesan: 010 deltaDelay t1
-		// set Time
-		Time.setCurrentTimeMillis(
-				Long.parseLong(mesgSplit[3]) + 
-				Long.parseLong(mesgSplit[2]) + 
-				(Time.currentTimeMillis() - t2) );
+		Time.setCurrentTimeMillis (Long.parseLong(mesgSplit[3]) + Long.parseLong(mesgSplit[2]) + (Time.currentTimeMillis() - t2));
 
-		// format pesan reply : 010 t2 t3 (time after set)
-		String message = "2 " + CM_ADDR + " " + (Time.currentTimeMillis());
-		System.out.println(stringFormatTime.SFFull(Time.currentTimeMillis()));
-		lock.lock();
-		try {
-		    startTransmitter(fio, message);
-		} finally {
-		    lock.unlock();
-		}
+		String message = "2 " + CM_ADDR;
+		transmitFrame(fio, message);
 	}
 	
-	private static void processGetTimeNOW(String mesgSplit[], long t2) throws Exception { 
-		// untuk memproses Get time NOW
-		// <KodePesan>space<Pesan1>space<Pesan2> = 01 t1 t1
-		// 01 t2 t1
-		long t1 = Long.parseLong(mesgSplit[2]);
-		String message = "3 " + CM_ADDR + " " + t1 + " " + t2;
-		lock.lock();
-		try {
-		    startTransmitter(fio, message);
-		} finally {
-		    lock.unlock();
-		}
+	private static void processGetTimeNOW(String mesgSplit[]) throws Exception { 
+		String message = "3 " + CM_ADDR;
+		transmitFrame(fio, message);
 	}
 	
-	// Sensing and transmit 
 	private static void goSense() throws Exception {
 		green.off();
 		red.on();
 		
 		new Thread() { 
+			@Override
 			public void run() {
-				String valStr;
-//				short[] valAccl = new short[3];
-				long getT;
-				
-//				try { 
-//					initACCL();
-//				} catch (Exception e) { 
-//					e.printStackTrace();
-//				}		
-				
 				while (!exit) {
 					try { 
-						
 						if (!isSensing) {
-				            Thread.sleep(100);
+//				            Thread.sleep(50);
 				            continue;
 				        }
-						getT = Time.currentTimeMillis(); 
-						//acclSensor.getValuesRaw(valAccl, 0);
 						
-						String sensorData;
-						
+						String sensorData = null;
 						try {
 						    sensorData = sensor.readAll();
 						} catch (Exception e) {
-						    e.printStackTrace();
-						    sensorData = "ERROR"; // fallback biar tetap jalan
+							threadSleep(50);
 						}
+						
+						if (sensorData == null) continue;
 
-						valStr = SN + " " + CM_ADDR + " " + sensorData;
-		
-						//valStr = SN + " " + CM_ADDR + " " + stringFormatTime.SFFull(getT) + " " + Arrays.toString(valAccl);
+						sensorData = sensorData.trim();
+
+						if (sensorData.isEmpty() || sensorData.equals("ERROR")) {
+						    continue;
+						}
 						
 						lock.lock();
 						int totalBuffer;
 						try {
-						    totalBuffer = dataQueue.size() + buffer.size();
+						    totalBuffer = pendingData.size() + unackedData.size();
 						} finally {
 						    lock.unlock();
 						}
 
 						if (totalBuffer >= MAX_BUFFER) {
-						    isSensing = false;
+						    Thread.sleep(200);
 						    continue;
 						}
 						
+						String currentData = SN + " " + CM_ADDR + " " + sensorData;
+						System.out.println(currentData);
+						
+						lock.lock();
+					    try {
+						    	pendingData.put(SN, currentData);
+					    } finally {
+					        lock.unlock();
+					    }
+
+						SN++;
+						
+						int size;
 						lock.lock();
 						try {
-						    dataQueue.put(SN, valStr);
-						    SN++;
+						    size = pendingData.size();
 						} finally {
 						    lock.unlock();
 						}
-
-	                    //System.out.println("QUEUE SN=" + SN);
 											
-	                    if (dataQueue.size() > MAX_BUFFER * 0.8) {
-	                        Thread.sleep(500); // memperlambat sensing jika buffer uda mau penuh
+	                    if (size > MAX_BUFFER * 0.8) {
+	                        Thread.sleep(100); // memperlambat sensing jika buffer uda mau penuh
 	                    } else {
-	                        Thread.sleep(100); // normal
+	                        Thread.sleep(50); // normal
 	                    }
-						
 					} catch (InterruptedException e) {
-						e.printStackTrace();
+						threadSleep(50);
 					} catch (Exception e) {
-					    e.printStackTrace();
+						threadSleep(50);
 					};
 				}
-				
-				//DEBUG
-				System.out.println("Keluar goSense");
 			}
 		}.start();
 	}
 	
 	private static void startSender() {
 	    new Thread() {
+	    		@Override
+	        public void run() {
+	            while (!exit) {
+	                	lock.lock();
+	                	try {
+	                		if (!pendingData.isEmpty()) {
+
+	                	        // ambil 1 data (yang pertama)
+	                	        int seq = pendingData.keySet().iterator().next();
+	                	        String data = "4 " + pendingData.get(seq);
+
+	                	        try {
+	                	        		transmitFrame(fio, data);
+	                	        } catch (Exception e) {
+	                	        		threadSleep(50);
+	                	        }
+
+	                	        // pindah ke unackedData
+	                	        unackedData.put(seq, data);
+
+	                	        // simpan waktu kirim
+	                	        sentTime.put(seq, Time.currentTimeMillis());
+
+	                	        // hapus dari pendingData
+	                	        pendingData.remove(seq);
+	                	    }
+	                	} finally {
+	                	    lock.unlock();
+	                	}	                   
+	            }
+	        }
+	    }.start();
+	}
+	
+	private static void startTimer() {
+	    new Thread() {
+	    		@Override
 	        public void run() {
 	            while (!exit) {
 	                try {
-	                    // isi window selama masih bisa
+	                    long now = Time.currentTimeMillis();
 
-		                	lock.lock();
-		                	try {
-		                	    for (int i = base; i < SN && i < base + WINDOW_SIZE; i++) {
-		                	        if (buffer.get(i) == null) {
-		                	            String data = dataQueue.get(i);
+	                    lock.lock();
+	                    try {
+		                    	int resendCount = 0;
 	
-		                	            if (data != null) {
-		                	            		if (i == base && buffer.get(i) == null) {
-		                	                    timerStart = Time.currentTimeMillis();
-		                	                }
-		                	                buffer.put(i, data);
-		                	                dataQueue.remove(i);
-		                	                System.out.println(data);
-		                	                sendSensingFrame(fio, data, i);
-		                	            }
-		                	        }
-		                	    }
-		                	} finally {
-		                	    lock.unlock();
-		                	}	                   
-	                    Thread.sleep(10); // kecil aja
-
+		                    	for (int seq : unackedData.keySet()) {
+		                    	    long last = sentTime.get(seq);
+		                    	    if (now - last > TIMEOUT) {
+		                    	        String data = unackedData.get(seq);
+		                    	        System.out.println("RESEND seq=" + seq);
+		                    	        transmitFrame(fio, data);
+		                    	        sentTime.put(seq, now);
+		                    	        resendCount++;
+	
+		                    	        // 🔥 BATASIN!
+		                    	        if (resendCount >= 2) break;
+		                    	    }
+		                    	}
+	                    } finally {
+	                        lock.unlock();
+	                    }
 	                } catch (Exception e) {
-	                    e.printStackTrace();
+	                		threadSleep(50);
 	                }
 	            }
 	        }
 	    }.start();
 	}
 	
-//	private static void initACCL() throws Exception {
-//		accelCs = NativeGPIO.getInstance(20); // init GPIO
-//		NativeSPI spi = NativeSPI.getInstance(0); // init SPI
-//		spi.open(ADXL345.SPI_MODE, ADXL345.SPI_BIT_ORDER, ADXL345.SPI_MAX_SPEED); // open SPI
-//		// Inisiasi ADXL345
-//		acclSensor = new ADXL345(spi,accelCs);
-//		acclSensor.open();
-//		acclSensor.setPowerControl(ADXL345.POWER_MODE_NORMAL);
-//		acclSensor.setDataFormat(ADXL345.DATA_FORMAT_RANGE_16G); 
-//		acclSensor.setDataRate(ADXL345.DATA_RATE_100HZ);
-//		acclSensor.setPowerControl(ADXL345.POWER_CONTROL_MEASURE);
-//	}
-	
-	private static void startTimer() {
-		new Thread() { //thread untuk timer seperti watch dog untuk Go Back N
-		    public void run() {
-		        while (!exit) {
-		            try {
-		                if (!buffer.isEmpty()) { //Apakah masi ada data yang belum di ACK ?
-		                    long now = Time.currentTimeMillis(); // waktu skrg
-
-		                    if (now - timerStart > TIMEOUT) { //uda berapa lama sejak frame dikirim
-
-		                        System.out.println("TIMEOUT → Go Back N dari SN=" + base);
-		                        
-		                        lock.lock();
-		                        try {
-			                        	for (int i = base; i < SN; i++) {
-			                        		String data = buffer.get(i);
-			                        		
-			                        		if (data != null) {
-			                        			sendSensingFrame(fio, data, i);
-			                        		}
-			                        	}
-		                        } finally {
-		                        	lock.unlock();
-		                        }
-
-		                        timerStart = now;
-		                    }
-		                }
-
-		                Thread.sleep(100);
-
-		            } catch (Exception e) {
-		                e.printStackTrace();
-		            }
-		        }
-		    }
-		}.start();
-	}
-	
 	private static void run() {
 		try {
 			initAll();
-			
 			green.on();
 			
-			startReceiver(fio);
-			startTimer();
-			startSender();
+			receiveFrame(fio);
 		} catch (Exception e) { 
-			e.printStackTrace(); 
+			threadSleep(50);
 		}
 	}
 		
 	public static void main(String [] args) throws Exception {
 		run();
+		System.out.println("Cluster Member Ready " + Long.toHexString(CM_ADDR));
 	}
 }
